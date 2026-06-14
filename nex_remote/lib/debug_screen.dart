@@ -1,13 +1,9 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-
+import 'models.dart';
 import 'mapping_channel.dart';
 
-/// Receives keycodes captured by the Kotlin AccessibilityService and shows
-/// the last keycode, the full history of keycodes received this session and
-/// the currently configured mappings.
+/// Live keycode monitor and mapping inspector for troubleshooting.
 class DebugScreen extends StatefulWidget {
   const DebugScreen({super.key});
 
@@ -16,130 +12,189 @@ class DebugScreen extends StatefulWidget {
 }
 
 class _DebugScreenState extends State<DebugScreen> {
-  static const EventChannel _keyEventChannel =
-      EventChannel('nex_remote/key_events');
+  StreamSubscription<int>? _sub;
+  int? _lastKc;
+  final List<int> _history = [];
+  List<MappingEntry> _mappings = [];
 
-  StreamSubscription<dynamic>? _subscription;
-  int? _lastKeycode;
-  final List<int> _history = <int>[];
-  Map<int, String> _mappings = <int, String>{};
-  Map<String, AppInfo> _appDetails = <String, AppInfo>{};
+  static const _maxHistory = 100;
 
   @override
   void initState() {
     super.initState();
     _loadMappings();
-    _subscription = _keyEventChannel.receiveBroadcastStream().listen(
-      (dynamic event) {
-        final int keycode = event as int;
-        setState(() {
-          _lastKeycode = keycode;
-          _history.add(keycode);
-        });
-      },
-    );
-  }
-
-  Future<void> _loadMappings() async {
-    final Map<int, String> mappings = await MappingChannel.getMappings();
-    final Map<String, AppInfo> details =
-        await MappingChannel.getAppDetails(mappings.values.toSet().toList());
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _mappings = mappings;
-      _appDetails = details;
+    _sub = MappingChannel.keyEvents.listen((kc) {
+      if (!mounted) return;
+      setState(() {
+        _lastKc = kc;
+        _history.add(kc);
+        if (_history.length > _maxHistory) _history.removeAt(0);
+      });
     });
   }
 
   @override
   void dispose() {
-    _subscription?.cancel();
+    _sub?.cancel();
     super.dispose();
   }
 
-  Widget _mappingsPanel(TextTheme textTheme) {
-    final List<int> keycodes = _mappings.keys.toList()..sort();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text('Current Mappings:', style: textTheme.titleLarge),
-        const SizedBox(height: 8),
-        if (keycodes.isEmpty)
-          Text('No mappings configured.', style: textTheme.bodyLarge)
-        else
-          for (final int keycode in keycodes)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                '$keycode → '
-                '${_appDetails[_mappings[keycode]]?.name ?? _mappings[keycode]}',
-                style: textTheme.titleMedium,
-              ),
-            ),
-      ],
-    );
+  Future<void> _loadMappings() async {
+    final m = await MappingChannel.getMappings();
+    if (mounted) setState(() => _mappings = m);
   }
 
   @override
   Widget build(BuildContext context) {
-    final TextTheme textTheme = Theme.of(context).textTheme;
-
     return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(48),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text('Nex Remote — Debug', style: textTheme.headlineMedium),
-              const SizedBox(height: 32),
-              Text(
-                'Last Keycode: ${_lastKeycode ?? '—'}',
-                style: textTheme.displaySmall?.copyWith(
-                  color: Colors.tealAccent,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text('History:', style: textTheme.titleLarge),
-                          const SizedBox(height: 8),
-                          Expanded(
-                            child: _history.isEmpty
-                                ? Text(
-                                    'Waiting for key events…\n\n'
-                                    'If nothing appears, enable "Nex Remote" '
-                                    'in Settings → Accessibility on this '
-                                    'device.',
-                                    style: textTheme.bodyLarge,
-                                  )
-                                : SingleChildScrollView(
-                                    reverse: true,
-                                    child: Text(
-                                      _history.join(' '),
-                                      style: textTheme.headlineSmall,
-                                    ),
-                                  ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 32),
-                    Expanded(child: _mappingsPanel(textTheme)),
-                  ],
-                ),
-              ),
-            ],
+      backgroundColor: const Color(0xFF121212),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text('Debug', style: TextStyle(color: Colors.white)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.white70),
+            onPressed: _loadMappings,
+            tooltip: 'Refresh mappings',
           ),
+          IconButton(
+            icon: const Icon(Icons.clear_all, color: Colors.white70),
+            onPressed: () => setState(() { _history.clear(); _lastKc = null; }),
+            tooltip: 'Clear history',
+          ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Last keycode
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E1E),
+                  borderRadius: BorderRadius.circular(10)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('LAST KEY',
+                      style: TextStyle(
+                          color: Colors.white38,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2)),
+                  const SizedBox(height: 4),
+                  Text(
+                    _lastKc != null
+                        ? '${MappingChannel.friendlyKeyName(_lastKc!)}  ($_lastKc)'
+                        : '—  press a button',
+                    style: const TextStyle(
+                        color: Colors.tealAccent,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // History
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('HISTORY',
+                            style: TextStyle(
+                                color: Colors.white38,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.2)),
+                        const SizedBox(height: 8),
+                        Expanded(
+                          child: _history.isEmpty
+                              ? const Text(
+                                  'Waiting for key events…\n\nEnable Nex Remote in Settings → Accessibility.',
+                                  style: TextStyle(
+                                      color: Colors.white38, fontSize: 13))
+                              : SingleChildScrollView(
+                                  reverse: true,
+                                  child: Wrap(
+                                    spacing: 6,
+                                    runSpacing: 4,
+                                    children: _history.reversed.take(50).map((kc) =>
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white10,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text('$kc',
+                                            style: const TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 12,
+                                                fontFamily: 'monospace')),
+                                      )).toList(),
+                                  ),
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  // Mappings
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('MAPPINGS',
+                            style: TextStyle(
+                                color: Colors.white38,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.2)),
+                        const SizedBox(height: 8),
+                        Expanded(
+                          child: _mappings.isEmpty
+                              ? const Text('No mappings.',
+                                  style: TextStyle(color: Colors.white38))
+                              : ListView.builder(
+                                  itemCount: _mappings.length,
+                                  itemBuilder: (_, i) {
+                                    final m = _mappings[i];
+                                    return Padding(
+                                      padding: const EdgeInsets.only(bottom: 6),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '${MappingChannel.friendlyKeyName(m.keycode)} [${m.eventType.label}]',
+                                            style: const TextStyle(
+                                                color: Colors.tealAccent,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold),
+                                          ),
+                                          Text(m.action.displayName,
+                                              style: const TextStyle(
+                                                  color: Colors.white70,
+                                                  fontSize: 12)),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

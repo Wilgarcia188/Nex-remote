@@ -1,68 +1,60 @@
 package com.nexremote.nex_remote
 
 import android.accessibilityservice.AccessibilityService
-import android.content.Intent
 import android.util.Log
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 
 /**
- * AccessibilityService that receives hardware key events (remote control
- * buttons), forwards every keycode to Flutter for the debug screen, and
- * launches the mapped application when a configured button is pressed.
+ * AccessibilityService that intercepts hardware key events and dispatches
+ * mapped actions via ActionExecutor. TimingEngine handles single/double/long/hold
+ * detection. Every ACTION_DOWN is forwarded to Flutter for the capture UI.
  */
 class KeyEventService : AccessibilityService() {
 
-    companion object {
-        private const val TAG = "NexRemote"
-    }
+    private val tag = "NexRemote.Service"
+
+    private lateinit var executor: ActionExecutor
+    private lateinit var timing: TimingEngine
+    private val stateListener = { updateOverlay() }
 
     override fun onServiceConnected() {
-        super.onServiceConnected()
-        Log.d(TAG, "KeyEventService connected")
+        Log.d(tag, "Service connected")
+        executor = ActionExecutor(this)
+        timing = TimingEngine { keycode, eventType ->
+            dispatchMappedEvent(keycode, eventType)
+        }
+        NexRemoteState.addListener(stateListener)
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        val keyCode = event.keyCode
-        val mappedPackage = MappingStore.getPackageFor(this, keyCode)
+        val kc = event.keyCode
 
+        // Always forward ACTION_DOWN to Flutter for debug / capture screens
         if (event.action == KeyEvent.ACTION_DOWN) {
-            Log.d(TAG, "Key event received: keyCode=$keyCode mappedTo=${mappedPackage ?: "none"}")
-            KeyEventDispatcher.dispatch(keyCode)
-            if (mappedPackage != null) {
-                launchApp(mappedPackage)
-                return true
-            }
-            return false
+            KeyEventDispatcher.dispatch(kc)
         }
 
-        // Consume the matching ACTION_UP of a remapped button so the system
-        // never sees half of the key press. Unmapped keys pass through.
-        return mappedPackage != null
+        val entries = MappingStore.getMappingsForKey(this, kc)
+        return timing.process(event, entries.isNotEmpty())
     }
 
-    private fun launchApp(targetPackage: String) {
-        val pm = packageManager
-        val intent = pm.getLeanbackLaunchIntentForPackage(targetPackage)
-            ?: pm.getLaunchIntentForPackage(targetPackage)
-        if (intent == null) {
-            Log.w(TAG, "No launch intent found for $targetPackage")
-            return
-        }
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
-        try {
-            startActivity(intent)
-            Log.d(TAG, "Launched $targetPackage")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to launch $targetPackage", e)
-        }
+    private fun dispatchMappedEvent(keycode: Int, eventType: String) {
+        val entries = MappingStore.getMappingsForKey(this, keycode)
+        val entry = entries.firstOrNull { it.eventType == eventType } ?: return
+        Log.d(tag, "Executing $eventType for keycode=$keycode action=${entry.action.optString("type")}")
+        executor.execute(entry.action)
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Not used. This service only listens for hardware key events.
+    private fun updateOverlay() {
+        // No overlay shown by default; OverlayManager can be wired here if needed.
     }
 
-    override fun onInterrupt() {
-        // Not used.
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    override fun onInterrupt() = Unit
+
+    override fun onDestroy() {
+        super.onDestroy()
+        NexRemoteState.removeListener(stateListener)
     }
 }

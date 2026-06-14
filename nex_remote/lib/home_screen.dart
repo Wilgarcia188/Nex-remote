@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
-
-import 'app_picker_screen.dart';
-import 'button_capture_screen.dart';
-import 'debug_screen.dart';
+import 'models.dart';
 import 'mapping_channel.dart';
+import 'button_mapper_screen.dart';
+import 'profile_screen.dart';
 import 'settings_screen.dart';
+import 'debug_screen.dart';
 import 'tv_focusable.dart';
 
-/// TV-friendly home screen: shows every configurable button with its
-/// assigned app, plus entries for the debug screen and settings.
-/// Fully navigable with UP/DOWN/LEFT/RIGHT/OK/BACK.
+/// Main hub: lists all button mappings grouped by keycode, shows profile name,
+/// accessibility warning, and lets users add / edit / delete mappings.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -18,9 +17,9 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  Map<int, String> _mappings = <int, String>{};
-  Map<String, AppInfo> _appDetails = <String, AppInfo>{};
-  bool _serviceEnabled = true;
+  List<MappingEntry> _mappings = [];
+  bool _accessibilityOk = false;
+  String _profileName = 'Default';
   bool _loading = true;
 
   @override
@@ -38,168 +37,291 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _load();
-    }
+    if (state == AppLifecycleState.resumed) _load();
   }
 
   Future<void> _load() async {
-    final Map<int, String> mappings = await MappingChannel.getMappings();
-    final Map<String, AppInfo> details =
-        await MappingChannel.getAppDetails(mappings.values.toSet().toList());
-    final bool serviceEnabled =
-        await MappingChannel.isAccessibilityServiceEnabled();
-    if (!mounted) {
-      return;
-    }
+    final mappings = await MappingChannel.getMappings();
+    final accessible = await MappingChannel.isAccessibilityEnabled();
+    final profiles = await MappingChannel.getProfiles();
+    final currentId = await MappingChannel.getCurrentProfile();
+    final profile = profiles.where((p) => p.id == currentId).firstOrNull ??
+        const AppProfile(id: 'default', name: 'Default');
+    if (!mounted) return;
     setState(() {
       _mappings = mappings;
-      _appDetails = details;
-      _serviceEnabled = serviceEnabled;
+      _accessibilityOk = accessible;
+      _profileName = profile.name;
       _loading = false;
     });
   }
 
-  Future<void> _configureButton(int keycode) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (BuildContext context) => AppPickerScreen(keycode: keycode),
-      ),
-    );
-    await _load();
-  }
-
-  Future<void> _openCaptureMode() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<bool>(
-        builder: (BuildContext context) => const ButtonCaptureScreen(),
-      ),
-    );
-    await _load();
-  }
-
-  Widget _buttonTile(int keycode, {required bool autofocus}) {
-    final String? packageName = _mappings[keycode];
-    final AppInfo? app =
-        packageName == null ? null : _appDetails[packageName];
-    final String label = packageName == null
-        ? 'Not Configured'
-        : (app?.name ?? packageName);
-
-    return TvListTile(
-      autofocus: autofocus,
-      leading: app?.icon != null
-          ? Image.memory(app!.icon!, width: 40, height: 40)
-          : Icon(
-              packageName == null ? Icons.radio_button_unchecked : Icons.apps,
-              size: 36,
-            ),
-      title: Text('$keycode  →  $label'),
-      subtitle: packageName == null ? null : Text(packageName),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () => _configureButton(keycode),
-    );
-  }
-
-  Widget _serviceWarning() {
-    return TvListTile(
-      accentColor: Colors.orange,
-      leading: const Icon(Icons.warning_amber_rounded),
-      title: const Text('Accessibility service is OFF'),
-      subtitle: const Text(
-        'Button remapping needs the Nex Remote accessibility service. '
-        'Press OK to open Accessibility settings and enable it.',
-      ),
-      onTap: MappingChannel.openAccessibilitySettings,
-    );
+  Map<int, List<MappingEntry>> get _grouped {
+    final m = <int, List<MappingEntry>>{};
+    for (final e in _mappings) {
+      m.putIfAbsent(e.keycode, () => []).add(e);
+    }
+    return Map.fromEntries(m.entries.toList()..sort((a, b) => a.key.compareTo(b.key)));
   }
 
   @override
   Widget build(BuildContext context) {
-    final TextTheme textTheme = Theme.of(context).textTheme;
-
     return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : ListView(
-                  children: <Widget>[
-                    // ── Header ──────────────────────────────────────────────
-                    Text(
-                      'NEX REMOTE',
-                      style: textTheme.headlineLarge?.copyWith(
-                        color: Colors.tealAccent,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 4,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text('Configured Buttons', style: textTheme.titleLarge),
-                    if (!_serviceEnabled) _serviceWarning(),
-                    const SizedBox(height: 8),
-
-                    // ── Configured button rows ───────────────────────────────
-                    for (int i = 0;
-                        i < MappingChannel.supportedKeycodes.length;
-                        i++)
-                      _buttonTile(
-                        MappingChannel.supportedKeycodes[i],
-                        autofocus: i == 0,
-                      ),
-
-                    // ── Add Mapping via capture ──────────────────────────────
-                    const SizedBox(height: 8),
-                    TvListTile(
-                      accentColor: Colors.tealAccent,
-                      leading: const Icon(Icons.add_circle_outline, size: 36),
-                      title: const Text('Add Mapping'),
-                      subtitle: const Text(
-                        'Press a button on the remote to detect its keycode, '
-                        'then choose an app to launch',
-                      ),
-                      trailing: const Icon(Icons.arrow_forward_ios),
-                      onTap: _openCaptureMode,
-                    ),
-
-                    const Divider(height: 32),
-
-                    // ── Debug & Settings ─────────────────────────────────────
-                    TvListTile(
-                      leading: const Icon(Icons.bug_report),
-                      title: const Text('Debug Screen'),
-                      subtitle:
-                          const Text('Live keycodes and current mappings'),
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (BuildContext context) =>
-                                const DebugScreen(),
-                          ),
-                        );
-                      },
-                    ),
-                    TvListTile(
-                      leading: const Icon(Icons.settings),
-                      title: const Text('Settings'),
-                      subtitle: const Text(
-                        'Export, import or reset all mappings',
-                      ),
-                      onTap: () async {
-                        await Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (BuildContext context) =>
-                                const SettingsScreen(),
-                          ),
-                        );
-                        await _load();
-                      },
-                    ),
-                  ],
-                ),
+      backgroundColor: const Color(0xFF121212),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Nex Remote',
+                style: TextStyle(
+                    color: Colors.tealAccent,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold)),
+            Text(_profileName,
+                style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.account_circle_outlined, color: Colors.white70),
+            tooltip: 'Profiles',
+            onPressed: () async {
+              await Navigator.push(
+                  context, MaterialPageRoute(builder: (_) => const ProfileScreen()));
+              _load();
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.bug_report_outlined, color: Colors.white70),
+            tooltip: 'Debug',
+            onPressed: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => const DebugScreen())),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined, color: Colors.white70),
+            tooltip: 'Settings',
+            onPressed: () async {
+              await Navigator.push(
+                  context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+              _load();
+            },
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: Colors.tealAccent))
+          : Column(
+              children: [
+                if (!_accessibilityOk) _accessibilityBanner(),
+                Expanded(child: _body()),
+              ],
+            ),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: Colors.tealAccent,
+        foregroundColor: Colors.black,
+        icon: const Icon(Icons.add),
+        label: const Text('Add Mapping'),
+        onPressed: _addMapping,
       ),
     );
   }
+
+  Widget _accessibilityBanner() => Material(
+        color: Colors.orange.shade800,
+        child: InkWell(
+          onTap: MappingChannel.openAccessibilitySettings,
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.white),
+              SizedBox(width: 12),
+              Expanded(
+                  child: Text('Accessibility service disabled — tap to enable',
+                      style: TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w500))),
+              Icon(Icons.chevron_right, color: Colors.white),
+            ]),
+          ),
+        ),
+      );
+
+  Widget _body() {
+    if (_mappings.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            Icon(Icons.gamepad_outlined, size: 64, color: Colors.white24),
+            SizedBox(height: 16),
+            Text('No mappings yet', style: TextStyle(color: Colors.white54, fontSize: 16)),
+            SizedBox(height: 8),
+            Text('Tap + to capture a button and assign an action',
+                style: TextStyle(color: Colors.white38, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    final grouped = _grouped;
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemCount: grouped.length,
+      itemBuilder: (_, i) {
+        final kc = grouped.keys.elementAt(i);
+        final entries = grouped[kc]!;
+        return _KeycodeCard(
+          keycode: kc,
+          entries: entries,
+          onAddEvent: () => _addEventToKey(kc),
+          onEdit: _editEntry,
+          onDelete: _deleteEntry,
+        );
+      },
+    );
+  }
+
+  Future<void> _addMapping() async {
+    final ok = await Navigator.push<bool>(
+        context, MaterialPageRoute(builder: (_) => const ButtonMapperScreen()));
+    if (ok == true) _load();
+  }
+
+  Future<void> _addEventToKey(int keycode) async {
+    final ok = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+            builder: (_) => ButtonMapperScreen(preselectedKeycode: keycode)));
+    if (ok == true) _load();
+  }
+
+  Future<void> _editEntry(MappingEntry entry) async {
+    final ok = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+            builder: (_) => ButtonMapperScreen(editEntry: entry)));
+    if (ok == true) _load();
+  }
+
+  Future<void> _deleteEntry(MappingEntry entry) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF2C2C2C),
+        title: const Text('Delete mapping?', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Remove ${entry.eventType.label} → ${entry.action.displayName} '
+          'for ${MappingChannel.friendlyKeyName(entry.keycode)}?',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete', style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await MappingChannel.removeMapping(entry.id);
+      _load();
+    }
+  }
+}
+
+// ── Keycode card ───────────────────────────────────────────────────────────────
+
+class _KeycodeCard extends StatelessWidget {
+  final int keycode;
+  final List<MappingEntry> entries;
+  final VoidCallback onAddEvent;
+  final void Function(MappingEntry) onEdit;
+  final void Function(MappingEntry) onDelete;
+
+  const _KeycodeCard({
+    required this.keycode,
+    required this.entries,
+    required this.onAddEvent,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E1E),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header row
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 6, 8),
+              child: Row(children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.tealAccent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.tealAccent.withValues(alpha: 0.4)),
+                  ),
+                  child: Text(
+                    MappingChannel.friendlyKeyName(keycode),
+                    style: const TextStyle(
+                        color: Colors.tealAccent,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13),
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.add, color: Colors.tealAccent, size: 20),
+                  tooltip: 'Add event type',
+                  onPressed: onAddEvent,
+                ),
+              ]),
+            ),
+            const Divider(height: 1, color: Colors.white12),
+            ...entries.map((e) => _EntryRow(entry: e, onEdit: onEdit, onDelete: onDelete)),
+          ],
+        ),
+      );
+}
+
+class _EntryRow extends StatelessWidget {
+  final MappingEntry entry;
+  final void Function(MappingEntry) onEdit;
+  final void Function(MappingEntry) onDelete;
+
+  const _EntryRow(
+      {required this.entry, required this.onEdit, required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+        dense: true,
+        leading: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+              color: Colors.white10, borderRadius: BorderRadius.circular(4)),
+          child: Text(entry.eventType.label,
+              style: const TextStyle(color: Colors.white60, fontSize: 11)),
+        ),
+        title: Text(entry.action.displayName,
+            style: const TextStyle(color: Colors.white, fontSize: 14)),
+        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          IconButton(
+            icon: const Icon(Icons.edit_outlined, size: 18, color: Colors.white54),
+            onPressed: () => onEdit(entry),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+            onPressed: () => onDelete(entry),
+          ),
+        ]),
+      );
 }

@@ -2,9 +2,9 @@ package com.nexremote.nex_remote
 
 import android.content.ComponentName
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.Looper
@@ -12,8 +12,8 @@ import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
-import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -22,188 +22,195 @@ import java.util.concurrent.Executors
 class MainActivity : FlutterActivity() {
 
     companion object {
-        private const val KEY_EVENT_CHANNEL = "nex_remote/key_events"
+        private const val EVENT_CHANNEL  = "nex_remote/key_events"
         private const val METHOD_CHANNEL = "nex_remote/methods"
-        private const val EXPORT_FILE_NAME = "nex_remote_mappings.json"
-        private const val ICON_SIZE = 96
+        private const val ICON_SIZE      = 96
+        private const val EXPORT_FILE    = "nex_remote_mappings.json"
     }
 
-    private val executor = Executors.newSingleThreadExecutor()
+    private val worker      = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
+    override fun configureFlutterEngine(engine: FlutterEngine) {
+        super.configureFlutterEngine(engine)
 
-        EventChannel(flutterEngine.dartExecutor.binaryMessenger, KEY_EVENT_CHANNEL)
+        // ── Key event stream ──────────────────────────────────────────────
+        EventChannel(engine.dartExecutor.binaryMessenger, EVENT_CHANNEL)
             .setStreamHandler(object : EventChannel.StreamHandler {
-                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-                    KeyEventDispatcher.eventSink = events
+                override fun onListen(args: Any?, sink: EventChannel.EventSink) {
+                    KeyEventDispatcher.eventSink = sink
                 }
-
-                override fun onCancel(arguments: Any?) {
+                override fun onCancel(args: Any?) {
                     KeyEventDispatcher.eventSink = null
                 }
             })
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
-            .setMethodCallHandler { call, result -> handleMethodCall(call, result) }
-    }
+        // ── Method channel ────────────────────────────────────────────────
+        MethodChannel(engine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
 
-    private fun handleMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        when (call.method) {
-            "getInstalledApps" -> runAsync(result) { getInstalledApps() }
+                    // ── Mappings ─────────────────────────────────────────
+                    "getMappings" -> async(result) {
+                        val pid = call.argument<String>("profileId")
+                        val list = MappingStore.getMappings(this, pid)
+                        val arr = JSONArray(); list.forEach { arr.put(it.toJson()) }
+                        arr.toString()
+                    }
 
-            "getMappings" -> result.success(mappingsWithStringKeys())
+                    "upsertMapping" -> async(result) {
+                        val json = call.argument<String>("mapping")!!
+                        val pid  = call.argument<String>("profileId")
+                        MappingStore.upsertMapping(this,
+                            MappingStore.MappingEntry.fromJson(JSONObject(json)), pid)
+                        "ok"
+                    }
 
-            "setMapping" -> {
-                val keycode = call.argument<Int>("keycode")
-                val packageName = call.argument<String>("packageName")
-                if (keycode == null || packageName.isNullOrEmpty()) {
-                    result.error("BAD_ARGS", "keycode and packageName are required", null)
-                } else {
-                    MappingStore.setMapping(this, keycode, packageName)
-                    result.success(null)
+                    "removeMapping" -> async(result) {
+                        val id  = call.argument<String>("id")!!
+                        val pid = call.argument<String>("profileId")
+                        MappingStore.removeMapping(this, id, pid)
+                        "ok"
+                    }
+
+                    "clearMappings" -> async(result) {
+                        MappingStore.clearMappings(this, call.argument<String>("profileId"))
+                        "ok"
+                    }
+
+                    // ── Profiles ──────────────────────────────────────────
+                    "getProfiles" -> async(result) {
+                        val arr = JSONArray()
+                        MappingStore.getProfiles(this).forEach { p ->
+                            arr.put(JSONObject().also { o -> o.put("id", p["id"]); o.put("name", p["name"]) })
+                        }
+                        arr.toString()
+                    }
+
+                    "getCurrentProfile" -> result.success(
+                        MappingStore.getCurrentProfileId(this)
+                    )
+
+                    "switchProfile" -> async(result) {
+                        MappingStore.switchProfile(this, call.argument<String>("id")!!)
+                        "ok"
+                    }
+
+                    "createProfile" -> async(result) {
+                        MappingStore.createProfile(this, call.argument<String>("name")!!)
+                    }
+
+                    "deleteProfile" -> async(result) {
+                        MappingStore.deleteProfile(this, call.argument<String>("id")!!)
+                        "ok"
+                    }
+
+                    // ── Apps ──────────────────────────────────────────────
+                    "getInstalledApps" -> async(result) { getInstalledAppsJson() }
+
+                    "getAppDetails" -> async(result) {
+                        getAppDetailsJson(call.argument<List<String>>("packages") ?: emptyList())
+                    }
+
+                    // ── Export / Import ───────────────────────────────────
+                    "exportMappings" -> async(result) {
+                        val json = MappingStore.exportAll(this)
+                        val file = exportFile(); file.writeText(json)
+                        JSONObject().also { o -> o.put("path", file.absolutePath); o.put("json", json) }.toString()
+                    }
+
+                    "importMappings" -> async(result) {
+                        val file = exportFile()
+                        check(file.exists()) { "Backup file not found: ${file.absolutePath}" }
+                        MappingStore.importAll(this, file.readText()).toString()
+                    }
+
+                    // ── Accessibility ─────────────────────────────────────
+                    "isAccessibilityEnabled" -> result.success(isA11yEnabled())
+
+                    "openAccessibilitySettings" -> {
+                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        result.success("ok")
+                    }
+
+                    else -> result.notImplemented()
                 }
             }
-
-            "removeMapping" -> {
-                val keycode = call.argument<Int>("keycode")
-                if (keycode == null) {
-                    result.error("BAD_ARGS", "keycode is required", null)
-                } else {
-                    MappingStore.removeMapping(this, keycode)
-                    result.success(null)
-                }
-            }
-
-            "clearMappings" -> {
-                MappingStore.clear(this)
-                result.success(null)
-            }
-
-            "getAppDetails" -> {
-                val packages = call.argument<List<String>>("packages") ?: emptyList()
-                runAsync(result) { getAppDetails(packages) }
-            }
-
-            "exportMappings" -> runAsync(result) { exportMappings() }
-
-            "importMappings" -> runAsync(result) { importMappings() }
-
-            "isAccessibilityServiceEnabled" -> result.success(isAccessibilityServiceEnabled())
-
-            "openAccessibilitySettings" -> {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                result.success(null)
-            }
-
-            else -> result.notImplemented()
-        }
     }
 
-    /** Runs [block] off the main thread and replies on the main thread. */
-    private fun <T> runAsync(result: MethodChannel.Result, block: () -> T) {
-        executor.execute {
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private fun <T> async(result: MethodChannel.Result, block: android.content.Context.() -> T) {
+        worker.submit {
             try {
-                val value = block()
-                mainHandler.post { result.success(value) }
+                val v = applicationContext.block()
+                mainHandler.post { result.success(v) }
             } catch (e: Exception) {
                 mainHandler.post { result.error("NATIVE_ERROR", e.message, null) }
             }
         }
     }
 
-    private fun mappingsWithStringKeys(): Map<String, String> =
-        MappingStore.getMappings(this).mapKeys { it.key.toString() }
-
-    /**
-     * Returns every launchable app on the device (Leanback first, then
-     * regular launcher activities) with name, package and PNG icon bytes.
-     */
-    private fun getInstalledApps(): List<Map<String, Any?>> {
+    private fun getInstalledAppsJson(): String {
         val pm = packageManager
-        val seen = LinkedHashMap<String, Map<String, Any?>>()
-        val categories = listOf(Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER)
-        for (category in categories) {
-            val intent = Intent(Intent.ACTION_MAIN).addCategory(category)
-            for (info in pm.queryIntentActivities(intent, 0)) {
-                val pkg = info.activityInfo.packageName
-                if (pkg == packageName || seen.containsKey(pkg)) continue
-                seen[pkg] = mapOf(
-                    "name" to info.loadLabel(pm).toString(),
-                    "packageName" to pkg,
-                    "icon" to drawableToPngBytes(info.loadIcon(pm)),
-                )
+        val seen = LinkedHashSet<String>()
+        val apps = mutableListOf<JSONObject>()
+        for (cat in listOf(Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER)) {
+            val intent = Intent(Intent.ACTION_MAIN).addCategory(cat)
+            for (ri in pm.queryIntentActivities(intent, 0)) {
+                val pkg = ri.activityInfo.packageName
+                if (pkg == packageName || !seen.add(pkg)) continue
+                apps.add(JSONObject().also { o ->
+                    o.put("name", ri.loadLabel(pm).toString())
+                    o.put("packageName", pkg)
+                    o.put("icon", drawableToPng(ri.loadIcon(pm)))
+                })
             }
         }
-        return seen.values.sortedBy { (it["name"] as String).lowercase() }
+        apps.sortBy { it.getString("name").lowercase() }
+        val arr = JSONArray(); apps.forEach { arr.put(it) }
+        return arr.toString()
     }
 
-    /** Resolves name and icon for specific packages (e.g. current mappings). */
-    private fun getAppDetails(packages: List<String>): Map<String, Map<String, Any?>> {
+    private fun getAppDetailsJson(packages: List<String>): String {
         val pm = packageManager
-        val result = mutableMapOf<String, Map<String, Any?>>()
-        for (pkg in packages) {
+        val arr = JSONArray()
+        packages.forEach { pkg ->
+            val o = JSONObject()
+            o.put("packageName", pkg)
             try {
-                val appInfo = pm.getApplicationInfo(pkg, 0)
-                result[pkg] = mapOf(
-                    "name" to pm.getApplicationLabel(appInfo).toString(),
-                    "packageName" to pkg,
-                    "icon" to drawableToPngBytes(pm.getApplicationIcon(appInfo)),
-                )
-            } catch (e: PackageManager.NameNotFoundException) {
-                // App was uninstalled; let Flutter fall back to the package name.
+                val ai = pm.getApplicationInfo(pkg, 0)
+                o.put("name", pm.getApplicationLabel(ai).toString())
+                o.put("icon", drawableToPng(pm.getApplicationIcon(ai)))
+            } catch (_: Exception) {
+                o.put("name", pkg); o.put("icon", JSONObject.NULL)
             }
+            arr.put(o)
         }
-        return result
+        return arr.toString()
     }
 
-    private fun drawableToPngBytes(drawable: Drawable): ByteArray {
-        val bitmap = Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        drawable.setBounds(0, 0, ICON_SIZE, ICON_SIZE)
-        drawable.draw(canvas)
+    private fun drawableToPng(drawable: Drawable?): ByteArray? {
+        if (drawable == null) return null
+        val bmp = if (drawable is BitmapDrawable && drawable.bitmap != null) {
+            Bitmap.createScaledBitmap(drawable.bitmap, ICON_SIZE, ICON_SIZE, true)
+        } else {
+            Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888).also { bmp ->
+                drawable.setBounds(0, 0, ICON_SIZE, ICON_SIZE); drawable.draw(Canvas(bmp))
+            }
+        }
         val out = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-        bitmap.recycle()
+        bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+        if (bmp !== (drawable as? BitmapDrawable)?.bitmap) bmp.recycle()
         return out.toByteArray()
     }
 
-    private fun exportFile(): File = File(getExternalFilesDir(null), EXPORT_FILE_NAME)
+    private fun exportFile(): File = File(getExternalFilesDir(null) ?: filesDir, EXPORT_FILE)
 
-    private fun exportMappings(): Map<String, String> {
-        val json = JSONObject()
-        for ((keycode, pkg) in MappingStore.getMappings(this)) {
-            json.put(keycode.toString(), pkg)
-        }
-        val pretty = json.toString(2)
-        val file = exportFile()
-        file.writeText(pretty)
-        return mapOf("path" to file.absolutePath, "json" to pretty)
-    }
-
-    private fun importMappings(): Map<String, String> {
-        val file = exportFile()
-        check(file.exists()) { "No mappings file found at ${file.absolutePath}" }
-        val json = JSONObject(file.readText())
-        val imported = mutableMapOf<String, String>()
-        for (key in json.keys()) {
-            val keycode = key.toIntOrNull() ?: continue
-            val pkg = json.optString(key)
-            if (pkg.isNotEmpty()) {
-                MappingStore.setMapping(this, keycode, pkg)
-                imported[key] = pkg
-            }
-        }
-        return imported
-    }
-
-    private fun isAccessibilityServiceEnabled(): Boolean {
+    private fun isA11yEnabled(): Boolean {
         val expected = ComponentName(this, KeyEventService::class.java)
-        val enabled = Settings.Secure.getString(
-            contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-        ) ?: return false
+        val enabled  = Settings.Secure.getString(
+            contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
         return enabled.split(':').any { ComponentName.unflattenFromString(it) == expected }
     }
 }
