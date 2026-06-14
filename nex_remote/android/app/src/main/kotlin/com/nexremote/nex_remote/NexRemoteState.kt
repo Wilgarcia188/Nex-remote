@@ -16,15 +16,15 @@ object NexRemoteState {
 
     private val listeners = mutableListOf<() -> Unit>()
 
-    fun toggleMouse() = post { isMouseEnabled = !isMouseEnabled; notify() }
+    fun toggleMouse() = post { isMouseEnabled = !isMouseEnabled; notifyListeners() }
 
-    fun toggleScroll() = post { isScrollEnabled = !isScrollEnabled; notify() }
+    fun toggleScroll() = post { isScrollEnabled = !isScrollEnabled; notifyListeners() }
 
     fun addListener(l: () -> Unit) = post { listeners.add(l) }
 
     fun removeListener(l: () -> Unit) = post { listeners.remove(l) }
 
-    private fun notify() = listeners.toList().forEach { it() }
+    private fun notifyListeners() = listeners.toList().forEach { it() }
 
     private fun post(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block() else handler.post(block)
