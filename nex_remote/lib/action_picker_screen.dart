@@ -1,5 +1,5 @@
 import 'dart:typed_data';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScrollAction;
 import 'models.dart';
 import 'mapping_channel.dart';
 import 'tv_focusable.dart';

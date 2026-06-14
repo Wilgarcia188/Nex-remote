@@ -1,4 +1,4 @@
-/// Data models shared across the app.
+// Data models shared across the app.
 
 enum EventType {
   single,

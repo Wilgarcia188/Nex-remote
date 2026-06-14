@@ -1,11 +1,10 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScrollAction;
 import 'models.dart';
 import 'mapping_channel.dart';
 import 'button_mapper_screen.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
 import 'debug_screen.dart';
-import 'tv_focusable.dart';
 
 /// Main hub: lists all button mappings grouped by keycode, shows profile name,
 /// accessibility warning, and lets users add / edit / delete mappings.
@@ -166,7 +165,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final grouped = _grouped;
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemCount: grouped.length,
       itemBuilder: (_, i) {
         final kc = grouped.keys.elementAt(i);

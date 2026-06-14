@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Nex Remote</string>
-    <string name="accessibility_service_description">Nex Remote reads remote-control key events to display their keycodes for debugging. It does not modify or block any button.</string>
+    <string name="accessibility_service_description">Nex Remote intercepts hardware key events from your remote control and executes the actions you have mapped to each button. Mapped buttons are consumed by the service.</string>
 </resources>
