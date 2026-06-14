@@ -1,0 +1,44 @@
+name: Build Nex Remote
+
+on:
+  push:
+    branches:
+      - 'claude/**'
+    paths:
+      - 'nex_remote/**'
+      - '.github/workflows/build-nex-remote.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nex_remote
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.1
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Flutter analyze
+        run: flutter analyze
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nex-remote-debug-apk
+          path: nex_remote/build/app/outputs/flutter-apk/app-debug.apk
