@@ -125,6 +125,12 @@ class MainActivity : FlutterActivity() {
                         MappingStore.importAll(this, file.readText()).toString()
                     }
 
+                    // ── Capture mode ──────────────────────────────────────
+                    "setCaptureMode" -> {
+                        NexRemoteState.isCaptureMode = call.argument<Boolean>("active") ?: false
+                        result.success("ok")
+                    }
+
                     // ── Accessibility ─────────────────────────────────────
                     "isAccessibilityEnabled" -> result.success(isA11yEnabled())
 

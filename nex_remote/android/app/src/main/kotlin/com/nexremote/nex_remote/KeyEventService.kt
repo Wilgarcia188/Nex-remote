@@ -35,6 +35,10 @@ class KeyEventService : AccessibilityService() {
             KeyEventDispatcher.dispatch(kc)
         }
 
+        // Capture mode: consume the event so it has no side-effects (no Back
+        // navigation, no Home screen), but skip mapping execution entirely.
+        if (NexRemoteState.isCaptureMode) return true
+
         val entries = MappingStore.getMappingsForKey(this, kc)
         return timing.process(event, entries.isNotEmpty())
     }

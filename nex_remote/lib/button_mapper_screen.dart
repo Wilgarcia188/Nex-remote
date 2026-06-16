@@ -36,27 +36,44 @@ class _ButtonMapperScreenState extends State<ButtonMapperScreen> {
       _action = e.action;
     } else if (widget.preselectedKeycode != null) {
       _keycode = widget.preselectedKeycode;
+    } else {
+      // Auto-enter capture for new mappings so the user never has to tap a
+      // button to start capture.  Setting _capturing directly (no setState)
+      // is safe here because the first build hasn't happened yet.
+      _capturing = true;
+      _enterCapture();
     }
   }
 
   @override
   void dispose() {
     _keySub?.cancel();
+    // Always release capture isolation on exit, even if the user backs out
+    // mid-capture.
+    MappingChannel.setCaptureMode(false);
     super.dispose();
   }
 
+  /// Called by the "Tap to change button" tile after a keycode has already
+  /// been captured.  Re-enters capture mode so the user can pick a new button.
   void _startCapture() {
     setState(() => _capturing = true);
-    _keySub?.cancel();
-    _keySub = MappingChannel.keyEvents.listen((kc) {
-      if (_capturing && !_isNavKey(kc)) {
-        _keySub?.cancel();
-        if (mounted) setState(() { _keycode = kc; _capturing = false; });
-      }
-    });
+    _enterCapture();
   }
 
-  bool _isNavKey(int kc) => const {4, 19, 20, 21, 22, 23}.contains(kc);
+  /// Enables native capture-mode isolation and subscribes to the key-event
+  /// stream.  The first keycode received is accepted unconditionally — Back (4)
+  /// and D-Pad Center (23) are fully capturable because the native side
+  /// consumes all events during capture and does not execute any mapped action.
+  void _enterCapture() {
+    MappingChannel.setCaptureMode(true);
+    _keySub?.cancel();
+    _keySub = MappingChannel.keyEvents.listen((kc) {
+      _keySub?.cancel();
+      MappingChannel.setCaptureMode(false);
+      if (mounted) setState(() { _keycode = kc; _capturing = false; });
+    });
+  }
 
   Future<void> _pickAction() async {
     final action = await Navigator.push<NexAction>(

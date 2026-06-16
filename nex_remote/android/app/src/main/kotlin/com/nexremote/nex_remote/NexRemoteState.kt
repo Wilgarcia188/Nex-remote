@@ -14,6 +14,11 @@ object NexRemoteState {
     @Volatile var isMouseEnabled  = false; private set
     @Volatile var isScrollEnabled = false; private set
 
+    // Set to true while ButtonMapperScreen is waiting for a keycode.
+    // KeyEventService reads this to skip TimingEngine and consume the event
+    // without executing any mapped action.
+    @Volatile var isCaptureMode = false
+
     private val listeners = mutableListOf<() -> Unit>()
 
     fun toggleMouse() = post { isMouseEnabled = !isMouseEnabled; notifyListeners() }

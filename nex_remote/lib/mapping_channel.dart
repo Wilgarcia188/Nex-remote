@@ -17,9 +17,21 @@ class MappingChannel {
 
   // ── Key event stream ──────────────────────────────────────────────────────
 
-  /// Stream of keycodes from the accessibility service (ACTION_DOWN only).
-  static Stream<int> get keyEvents =>
+  /// Shared broadcast stream of keycodes from the accessibility service
+  /// (ACTION_DOWN only).  Cached as a static final so that DebugScreen and
+  /// ButtonMapperScreen share one underlying native subscription, eliminating
+  /// the listen/cancel race that occurs when receiveBroadcastStream() is
+  /// called multiple times on the same EventChannel.
+  static final Stream<int> keyEvents =
       _events.receiveBroadcastStream().map((e) => e as int);
+
+  // ── Capture mode ─────────────────────────────────────────────────────────
+
+  /// Enables or disables native capture-mode isolation.
+  /// While active the AccessibilityService consumes every key event without
+  /// executing any mapped action, and continues forwarding keycodes to Flutter.
+  static Future<void> setCaptureMode(bool active) =>
+      _method.invokeMethod('setCaptureMode', {'active': active});
 
   // ── Mappings ──────────────────────────────────────────────────────────────
 
