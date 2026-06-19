@@ -223,8 +223,9 @@ class _ButtonMapperScreenState extends State<ButtonMapperScreen> {
         ),
       );
 
-  Widget _actionCard() => GestureDetector(
-        onTap: _pickAction,
+  Widget _actionCard() => TvFocusable(
+        onSelect: _pickAction,
+        borderRadius: 12,
         child: _Card(
           highlighted: _action != null,
           child: Row(

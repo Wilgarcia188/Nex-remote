@@ -44,6 +44,7 @@ class KeyEventService : AccessibilityService() {
     }
 
     private fun dispatchMappedEvent(keycode: Int, eventType: String) {
+        if (NexRemoteState.isCaptureMode) return
         val entries = MappingStore.getMappingsForKey(this, keycode)
         val entry = entries.firstOrNull { it.eventType == eventType } ?: return
         Log.d(tag, "Executing $eventType for keycode=$keycode action=${entry.action.optString("type")}")
