@@ -51,7 +51,7 @@ jobs:
         with:
           name: nex-remote-release-apk
           path: nex_remote/build/app/outputs/flutter-apk/nex-remote-*-release.apk
-          retention-days: 30
+          retention-days: 3
 
       - name: APK info
         run: |
