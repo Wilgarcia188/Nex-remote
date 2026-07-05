@@ -19,6 +19,10 @@ class _ActionPickerScreenState extends State<ActionPickerScreen> {
   bool _loadingApps = false;
   String _searchQuery = '';
   final _searchCtrl = TextEditingController();
+  // skipTraversal: D-Pad arrows must not land on the text field directly —
+  // focusing it pops the on-screen keyboard over the app list. The field is
+  // only focused explicitly via OK on its TvFocusable wrapper.
+  final _searchFocus = FocusNode(skipTraversal: true);
 
   @override
   void initState() {
@@ -32,6 +36,7 @@ class _ActionPickerScreenState extends State<ActionPickerScreen> {
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -118,8 +123,12 @@ class _ActionPickerScreenState extends State<ActionPickerScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-          child: TextField(
+          child: TvFocusable(
+            onSelect: () => _searchFocus.requestFocus(),
+            borderRadius: 10,
+            child: TextField(
             controller: _searchCtrl,
+            focusNode: _searchFocus,
             style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
               hintText: 'Search apps…',
@@ -143,6 +152,7 @@ class _ActionPickerScreenState extends State<ActionPickerScreen> {
               contentPadding: const EdgeInsets.symmetric(vertical: 10),
             ),
             onChanged: (v) => setState(() => _searchQuery = v),
+            ),
           ),
         ),
         Expanded(

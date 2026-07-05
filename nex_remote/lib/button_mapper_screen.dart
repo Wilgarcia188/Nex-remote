@@ -187,8 +187,11 @@ class _ButtonMapperScreenState extends State<ButtonMapperScreen> {
                     child: CircularProgressIndicator(
                         color: Colors.tealAccent, strokeWidth: 2)),
                 SizedBox(width: 12),
-                Text('Press any button on your remote…',
-                    style: TextStyle(color: Colors.white70)),
+                Expanded(
+                  child: Text(
+                      'Press any button on your remote…\n(Back is captured too — press it only to map it)',
+                      style: TextStyle(color: Colors.white70)),
+                ),
               ])
             else
               TvListTile(
@@ -204,22 +207,15 @@ class _ButtonMapperScreenState extends State<ButtonMapperScreen> {
         child: Column(
           children: EventType.values.map((et) {
             final sel = _eventType == et;
-            return ListTile(
-              dense: true,
-              focusColor: Colors.tealAccent.withValues(alpha: 0.18),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            return TvListTile(
               onTap: () => setState(() => _eventType = et),
               leading: Icon(
                 sel ? Icons.radio_button_checked : Icons.radio_button_unchecked,
                 color: sel ? Colors.tealAccent : Colors.white38,
                 size: 20,
               ),
-              title: Text(et.label,
-                  style: TextStyle(
-                      color: sel ? Colors.tealAccent : Colors.white70,
-                      fontWeight: sel ? FontWeight.bold : FontWeight.normal)),
-              subtitle: Text(et.description,
-                  style: const TextStyle(color: Colors.white38, fontSize: 11)),
+              title: et.label,
+              subtitle: et.description,
             );
           }).toList(),
         ),
