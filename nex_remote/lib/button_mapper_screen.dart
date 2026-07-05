@@ -206,6 +206,8 @@ class _ButtonMapperScreenState extends State<ButtonMapperScreen> {
             final sel = _eventType == et;
             return ListTile(
               dense: true,
+              focusColor: Colors.tealAccent.withValues(alpha: 0.18),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               onTap: () => setState(() => _eventType = et),
               leading: Icon(
                 sel ? Icons.radio_button_checked : Icons.radio_button_unchecked,

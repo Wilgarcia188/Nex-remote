@@ -29,9 +29,11 @@ class KeyEventService : AccessibilityService() {
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
         val kc = event.keyCode
+        val isRepeat = event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0
 
-        // Always forward ACTION_DOWN to Flutter for debug / capture screens
-        if (event.action == KeyEvent.ACTION_DOWN) {
+        // Forward the initial ACTION_DOWN to Flutter for debug / capture
+        // screens (auto-repeats are noise for capture, so skip them).
+        if (event.action == KeyEvent.ACTION_DOWN && !isRepeat) {
             KeyEventDispatcher.dispatch(kc)
         }
 
@@ -40,6 +42,13 @@ class KeyEventService : AccessibilityService() {
         if (NexRemoteState.isCaptureMode) return true
 
         val entries = MappingStore.getMappingsForKey(this, kc)
+
+        // Consume auto-repeats for mapped keys without feeding TimingEngine:
+        // repeats would otherwise reset the long/hold timers on every tick,
+        // and — right after a capture ends while the finger is still down —
+        // would re-enter the engine and fire the old mapping.
+        if (isRepeat) return entries.isNotEmpty()
+
         return timing.process(event, entries.isNotEmpty())
     }
 
