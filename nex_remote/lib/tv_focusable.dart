@@ -1,4 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+/// True when a key event is a D-Pad Center / OK / Enter press that should
+/// activate the focused widget on Android TV.
+bool _isSelectKey(KeyEvent event) =>
+    event is KeyDownEvent &&
+    (event.logicalKey == LogicalKeyboardKey.select ||
+        event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+        event.logicalKey == LogicalKeyboardKey.gameButtonA);
 
 /// Wraps any widget with a TV-friendly focus treatment:
 ///   • teal accent border (2 dp → 3 dp on focus)
@@ -67,6 +77,13 @@ class _TvFocusableState extends State<TvFocusable>
     return Focus(
       autofocus: widget.autofocus,
       onFocusChange: _onFocusChange,
+      onKeyEvent: (node, event) {
+        if (_isSelectKey(event)) {
+          widget.onSelect();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
       child: GestureDetector(
         onTap: widget.onSelect,
         child: ScaleTransition(
@@ -193,6 +210,13 @@ class _TvListTileCoreState extends State<_TvListTileCore>
     return Focus(
       autofocus: widget.autofocus,
       onFocusChange: _onFocusChange,
+      onKeyEvent: (node, event) {
+        if (_isSelectKey(event)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
       child: GestureDetector(
         onTap: widget.onTap,
         child: ScaleTransition(
